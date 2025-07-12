@@ -1,0 +1,1209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>E-Card</title>
+    
+    <!-- Firebase SDKs -->
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+    
+    <!-- Initialize Firebase -->
+    <script>
+    const firebaseConfig = {
+      apiKey: "AIzaSyAt5z8t9LETk_SJcFr-dB6fgFy8bO2tSfA",
+      authDomain: "e-card-ee286.firebaseapp.com",
+      projectId: "e-card-ee286",
+      storageBucket: "e-card-ee286.firebasestorage.app",
+      messagingSenderId: "202389524859",
+      appId: "1:202389524859:web:81644404aec5317bd96dde"
+    };
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
+    </script>
+    
+    <!-- Simple Auth System -->
+    <script>
+        // Simple user storage
+        let users = JSON.parse(localStorage.getItem('eCardUsers') || '[]');
+        let currentUser = JSON.parse(localStorage.getItem('eCardCurrentUser') || 'null');
+
+        // Check if user is signed in
+        function isSignedIn() {
+            return currentUser;
+        }
+
+        // Generate simple user ID
+        function generateUserId() {
+            return 'user_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+        }
+
+        // Simple sign up
+        window.signUp = function(email, password, username, imageUrl) {
+            // Check if email already exists
+            const existingUser = users.find(user => user.email === email);
+            if (existingUser) {
+                showAlert('Email already exists!', 'error');
+                return;
+            }
+
+            // Create user data
+            const userData = {
+                id: generateUserId(),
+                email: email,
+                password: password, // Store password for simple auth
+                username: username,
+                imageUrl: imageUrl || null,
+                elo: 1000,
+                gamesPlayed: 0,
+                wins: 0,
+                createdAt: new Date()
+            };
+
+            // Save user
+            users.push(userData);
+            localStorage.setItem('eCardUsers', JSON.stringify(users));
+            
+            // Sign in the new user
+            currentUser = userData;
+            localStorage.setItem('eCardCurrentUser', JSON.stringify(userData));
+            
+            showAlert('Account created successfully!', 'success');
+            hideAuthForms();
+            updateUserInfo(userData);
+        };
+
+        // Simple sign in
+        window.signIn = function(email, password) {
+            // Find user by email
+            const userData = users.find(user => user.email === email);
+            
+            if (!userData) {
+                showAlert('User not found!', 'error');
+                return;
+            }
+
+            // Simple password check (in real app, you'd hash passwords)
+            if (userData.password !== password) {
+                showAlert('Incorrect password!', 'error');
+                return;
+            }
+
+            // Sign in user
+            currentUser = userData;
+            localStorage.setItem('eCardCurrentUser', JSON.stringify(userData));
+            
+            showAlert('Signed in successfully!', 'success');
+            hideAuthForms();
+            updateUserInfo(userData);
+        };
+
+        // Simple sign out
+        window.signOut = function() {
+            currentUser = null;
+            localStorage.removeItem('eCardCurrentUser');
+            showAlert('Signed out successfully!', 'success');
+            showAuthForms();
+            resetUserInfo();
+        };
+
+        // Real Elo calculation function
+        function calculateEloChange(playerElo, opponentElo, result) {
+            const K = 32; // K-factor for rating changes
+            const expectedScore = 1 / (1 + Math.pow(10, (opponentElo - playerElo) / 400));
+            const actualScore = result === 'win' ? 1 : 0;
+            const eloChange = Math.round(K * (actualScore - expectedScore));
+            return eloChange;
+        }
+
+        // Elo update function with proper calculation
+        window.updateElo = function(userId, opponentElo, result) {
+            const userIndex = users.findIndex(user => user.id === userId);
+            if (userIndex !== -1) {
+                const userData = users[userIndex];
+                const eloChange = calculateEloChange(userData.elo, opponentElo, result);
+                const newElo = Math.max(0, userData.elo + eloChange);
+                
+                // Update user data
+                users[userIndex].elo = newElo;
+                users[userIndex].gamesPlayed += 1;
+                if (result === 'win') users[userIndex].wins += 1;
+                
+                // Update localStorage
+                localStorage.setItem('eCardUsers', JSON.stringify(users));
+                
+                // Update current user if it's the same user
+                if (currentUser && currentUser.id === userId) {
+                    currentUser.elo = newElo;
+                    currentUser.gamesPlayed += 1;
+                    if (result === 'win') currentUser.wins += 1;
+                    localStorage.setItem('eCardCurrentUser', JSON.stringify(currentUser));
+                }
+                
+                return { newElo, eloChange };
+            }
+        };
+
+        // Get leaderboard - only players who have played at least one match
+        window.getLeaderboard = function() {
+            return users
+                .filter(user => user.gamesPlayed > 0)
+                .sort((a, b) => b.elo - a.elo)
+                .slice(0, 10);
+        };
+
+        // Get user data
+        window.getUserData = function(userId) {
+            return users.find(user => user.id === userId) || null;
+        };
+
+        // Simple auth state check
+        function checkAuthState() {
+            if (currentUser) {
+                hideAuthForms();
+                updateUserInfo(currentUser);
+            } else {
+                // Hide auth forms by default - only show when user clicks Sign In
+                hideAuthForms();
+                resetUserInfo();
+            }
+        }
+
+        // Check auth state on page load
+        document.addEventListener('DOMContentLoaded', checkAuthState);
+        
+        // Test Firebase connection
+        async function testFirebaseConnection() {
+            try {
+                console.log('Testing Firebase connection...');
+                const testDoc = await db.collection('test').doc('connection').get();
+                console.log('Firebase connection successful!');
+                return true;
+            } catch (error) {
+                console.error('Firebase connection failed:', error);
+                return false;
+            }
+        }
+        
+        // Test connection on page load
+        document.addEventListener('DOMContentLoaded', async () => {
+            const isConnected = await testFirebaseConnection();
+            if (!isConnected) {
+                console.error('Firebase connection failed - check your Firestore rules!');
+            }
+        });
+    </script>
+    <style>
+        /* Reset and Base Styles */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Courier New', monospace;
+            background-color: #000000;
+            color: #0080ff;
+            line-height: 1.4;
+            font-size: 14px;
+            overflow-x: hidden;
+        }
+
+        /* Text Effects */
+        .highlight-text {
+            color: #0080ff;
+            text-shadow: 0 0 5px #0080ff, 0 0 10px #0080ff;
+            font-weight: bold;
+        }
+
+        .muted-text {
+            color: #cccccc;
+        }
+
+        /* Top Navigation Bar */
+        .top-bar {
+            background-color: #000000;
+            border-bottom: 2px solid #0080ff;
+            padding: 10px 0;
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+            box-shadow: 0 0 10px rgba(0, 128, 255, 0.3);
+        }
+
+        .nav-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0 20px;
+        }
+
+        .logo {
+            font-size: 18px;
+            font-weight: bold;
+            color: #0080ff;
+            text-shadow: 0 0 8px #0080ff;
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 20px;
+            list-style: none;
+        }
+
+        .nav-link {
+            color: #0080ff;
+            text-decoration: none;
+            padding: 5px 15px;
+            border: 1px solid #0080ff;
+            background-color: #000000;
+            transition: all 0.3s ease;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+        }
+
+        .nav-link:hover {
+            background-color: #0080ff;
+            color: #000000;
+            box-shadow: 0 0 10px #0080ff;
+        }
+
+        /* Main Container */
+        .main-container {
+            max-width: 1200px;
+            margin: 20px auto;
+            display: grid;
+            grid-template-columns: 300px 1fr;
+            gap: 20px;
+            padding: 0 20px;
+        }
+
+        /* Sidebar - Profile Box */
+        .sidebar {
+            width: 100%;
+        }
+
+        .profile-box {
+            border: 2px solid #0080ff;
+            background-color: #000000;
+            box-shadow: 0 0 15px rgba(0, 128, 255, 0.2);
+        }
+
+        .box-header {
+            background-color: #001122;
+            padding: 10px 15px;
+            border-bottom: 1px solid #0080ff;
+            font-weight: bold;
+            font-size: 16px;
+        }
+
+        .profile-content {
+            padding: 15px;
+        }
+
+        .profile-image {
+            text-align: center;
+            margin-bottom: 15px;
+        }
+
+        .placeholder-img {
+            width: 100px;
+            height: 100px;
+            border: 2px solid #0080ff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto;
+            background-color: #001122;
+            font-size: 12px;
+        }
+
+        .profile-info {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .info-line {
+            font-size: 13px;
+            padding: 2px 0;
+        }
+
+        /* Content Area */
+        .content-area {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .game-info-box, .stats-box {
+            border: 2px solid #0080ff;
+            background-color: #000000;
+            box-shadow: 0 0 15px rgba(0, 128, 255, 0.2);
+        }
+
+        .game-content, .stats-content {
+            padding: 15px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .content-line, .stat-line {
+            font-size: 13px;
+            padding: 2px 0;
+        }
+
+        .play-button {
+            color: #00ff00;
+            text-decoration: none;
+            font-weight: bold;
+            border: 1px solid #00ff00;
+            padding: 5px 10px;
+            background-color: #000000;
+            transition: all 0.3s ease;
+            display: inline-block;
+            margin-top: 5px;
+        }
+
+        .play-button:hover {
+            background-color: #00ff00;
+            color: #000000;
+            box-shadow: 0 0 10px #00ff00;
+        }
+
+        /* Footer */
+        .footer {
+            border-top: 2px solid #0080ff;
+            padding: 15px 0;
+            margin-top: 30px;
+            text-align: center;
+            background-color: #000000;
+            box-shadow: 0 0 10px rgba(0, 128, 255, 0.3);
+        }
+
+        .footer-content {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 20px;
+            font-size: 12px;
+        }
+
+        /* Responsive Design */
+        @media (max-width: 768px) {
+            .main-container {
+                grid-template-columns: 1fr;
+                gap: 15px;
+            }
+            
+            .nav-container {
+                flex-direction: column;
+                gap: 10px;
+            }
+            
+            .nav-links {
+                gap: 10px;
+            }
+            
+            .nav-link {
+                padding: 3px 10px;
+                font-size: 12px;
+            }
+            
+            .logo {
+                font-size: 16px;
+            }
+            
+            .box-header {
+                font-size: 14px;
+                padding: 8px 12px;
+            }
+            
+            .profile-content, .game-content, .stats-content {
+                padding: 12px;
+            }
+            
+            .placeholder-img {
+                width: 80px;
+                height: 80px;
+            }
+        }
+
+        @media (max-width: 480px) {
+            body {
+                font-size: 12px;
+            }
+            
+            .main-container {
+                padding: 0 10px;
+                gap: 10px;
+            }
+            
+            .nav-container {
+                padding: 0 10px;
+            }
+            
+            .nav-links {
+                flex-wrap: wrap;
+                justify-content: center;
+            }
+            
+            .box-header {
+                font-size: 13px;
+                padding: 6px 10px;
+            }
+            
+            .profile-content, .game-content, .stats-content {
+                padding: 10px;
+            }
+            
+            .info-line, .content-line, .stat-line {
+                font-size: 11px;
+            }
+            
+            .placeholder-img {
+                width: 60px;
+                height: 60px;
+                font-size: 10px;
+            }
+        }
+
+
+
+        /* Glow Effects */
+        .box-header:hover {
+            box-shadow: 0 0 20px rgba(0, 128, 255, 0.4);
+        }
+
+        .profile-box:hover, .game-info-box:hover, .stats-box:hover {
+            box-shadow: 0 0 25px rgba(0, 128, 255, 0.3);
+        }
+
+        /* Scrollbar Styling */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #000000;
+            border: 1px solid #0080ff;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #0080ff;
+            border-radius: 0;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #0066cc;
+        }
+
+        /* Auth Forms */
+        .auth-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.9);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 2000;
+        }
+
+        .auth-form {
+            background: #000000;
+            border: 2px solid #0080ff;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 0 20px rgba(0, 128, 255, 0.3);
+            max-width: 400px;
+            width: 90%;
+        }
+
+        .auth-form h2 {
+            color: #0080ff;
+            text-align: center;
+            margin-bottom: 20px;
+            font-size: 24px;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        .form-group label {
+            display: block;
+            color: #cccccc;
+            margin-bottom: 5px;
+            font-size: 14px;
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 10px;
+            background: #001122;
+            border: 1px solid #0080ff;
+            color: #ffffff;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            border-radius: 5px;
+        }
+
+        .form-group input:focus {
+            outline: none;
+            box-shadow: 0 0 10px rgba(0, 128, 255, 0.5);
+        }
+
+        .auth-buttons {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+        }
+
+        .auth-btn {
+            flex: 1;
+            padding: 10px;
+            background: #000000;
+            border: 1px solid #0080ff;
+            color: #0080ff;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .auth-btn:hover {
+            background: #0080ff;
+            color: #000000;
+            box-shadow: 0 0 10px #0080ff;
+        }
+
+        .auth-toggle {
+            text-align: center;
+            margin-top: 15px;
+        }
+
+        .auth-toggle a {
+            color: #0080ff;
+            text-decoration: none;
+            font-size: 12px;
+        }
+
+        .auth-toggle a:hover {
+            text-shadow: 0 0 5px #0080ff;
+        }
+
+        /* Alerts */
+        .alert {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 15px 20px;
+            border-radius: 5px;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            z-index: 3000;
+            max-width: 300px;
+            animation: slideIn 0.3s ease;
+        }
+
+        .alert.success {
+            background: #001122;
+            border: 1px solid #00ff00;
+            color: #00ff00;
+            box-shadow: 0 0 10px rgba(0, 255, 0, 0.3);
+        }
+
+        .alert.error {
+            background: #001122;
+            border: 1px solid #ff0000;
+            color: #ff0000;
+            box-shadow: 0 0 10px rgba(255, 0, 0, 0.3);
+        }
+
+        @keyframes slideIn {
+            from {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+
+        /* Hide auth forms when user is signed in */
+        .auth-overlay.hidden {
+            display: none;
+        }
+
+        /* User info updates */
+        .user-email {
+            color: #0080ff;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <!-- Top Navigation Bar -->
+    <div class="top-bar">
+        <div class="nav-container">
+            <div class="logo">E-Card</div>
+            <nav class="nav-links">
+                <a href="#" class="nav-link" id="play-nav">Play</a>
+                <a href="#" class="nav-link">About</a>
+                <a href="#" class="nav-link" id="auth-link">Sign In</a>
+            </nav>
+        </div>
+    </div>
+
+    <!-- Main Content Area -->
+    <div class="main-container">
+        <!-- Left Sidebar - Profile Box -->
+        <div class="sidebar">
+            <div class="profile-box">
+                <div class="box-header">
+                    Profile
+                </div>
+                <div class="profile-content">
+                    <div class="profile-image">
+                        <div class="placeholder-img" id="profile-image">
+                            <span class="muted-text">[IMG]</span>
+                        </div>
+                    </div>
+                    <div class="profile-info">
+                        <div class="info-line">
+                            Username: <span class="highlight-text">Player_001</span>
+                        </div>
+                        <div class="info-line">
+                            Status: <span class="highlight-text">Online</span>
+                        </div>
+                        <div class="info-line">
+                            Games: <span class="highlight-text">0</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Content Area -->
+        <div class="content-area">
+            <div class="game-info-box">
+                <div class="box-header">
+                    About E-Card
+                </div>
+                <div class="game-content">
+                    <div class="content-line">
+                        <span class="highlight-text">E-Card</span> - A fast-paced card game of risk and strategy
+                    </div>
+                    <div class="content-line">
+                        Experience the thrill of tactical card battles
+                    </div>
+                    <div class="content-line">
+                        Challenge players worldwide in real-time matches
+                    </div>
+                    <div class="content-line">
+                        Build your deck and master advanced strategies
+                    </div>
+                    <div class="content-line">
+                        Join tournaments and climb the leaderboards
+                    </div>
+                    <div class="content-line">
+                        
+                    </div>
+                    <div class="content-line">
+                        <span class="highlight-text">Ready to play?</span>
+                    </div>
+                    <div class="content-line">
+                        <a href="#" class="play-button" id="play-button">[START GAME]</a>
+                    </div>
+                    <div style="margin-top: 10px;">
+                        <button onclick="testFirebaseConnection()" style="padding: 5px 10px; background: #001122; border: 1px solid #0080ff; color: #0080ff; font-size: 12px;">Test Connection</button>
+                    </div>
+                    <div id="game-area" style="margin-top: 15px; padding: 10px; border: 1px solid #0080ff; background: #001122; min-height: 100px;"></div>
+                </div>
+            </div>
+
+            <div class="stats-box">
+                <div class="box-header">
+                    Leaderboard
+                </div>
+                <div class="stats-content" id="leaderboard-content">
+                    <div class="stat-line">
+                        Loading leaderboard...
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <div class="footer">
+        <div class="footer-content">
+            <span class="highlight-text">E-Card v1.0</span> | <span class="muted-text">Ready to play?</span>
+        </div>
+    </div>
+
+    <!-- Auth Overlay -->
+    <div class="auth-overlay" id="auth-overlay">
+        <!-- Sign In Form -->
+        <div class="auth-form" id="signin-form">
+            <h2>Sign In</h2>
+            <form onsubmit="handleSignIn(event)">
+                <div class="form-group">
+                    <label for="signin-email">Email</label>
+                    <input type="email" id="signin-email" required>
+                </div>
+                <div class="form-group">
+                    <label for="signin-password">Password</label>
+                    <input type="password" id="signin-password" required>
+                </div>
+                <div class="auth-buttons">
+                    <button type="submit" class="auth-btn">Sign In</button>
+                    <button type="button" class="auth-btn" onclick="toggleAuthForm()">Sign Up</button>
+                </div>
+            </form>
+        </div>
+
+        <!-- Sign Up Form -->
+        <div class="auth-form" id="signup-form" style="display: none;">
+            <h2>Sign Up</h2>
+            <form onsubmit="handleSignUp(event)">
+                <div class="form-group">
+                    <label for="signup-email">Email</label>
+                    <input type="email" id="signup-email" required>
+                </div>
+                <div class="form-group">
+                    <label for="signup-username">Username</label>
+                    <input type="text" id="signup-username" required minlength="3" maxlength="20" pattern="[a-zA-Z0-9_-]+" title="Username can only contain letters, numbers, underscores, and hyphens">
+                </div>
+                <div class="form-group">
+                    <label for="signup-password">Password</label>
+                    <input type="password" id="signup-password" required minlength="6">
+                </div>
+                <div class="form-group">
+                    <label for="signup-confirm">Confirm Password</label>
+                    <input type="password" id="signup-confirm" required minlength="6">
+                </div>
+                <div class="form-group">
+                    <label for="signup-image">Profile Image</label>
+                    <input type="file" id="signup-image-file" accept="image/*" style="display: none;" onchange="updateFileDisplay()">
+                    <input type="url" id="signup-image-url" placeholder="Or enter image URL">
+                    <button type="button" class="auth-btn" style="margin-top: 5px; width: 100%;" onclick="document.getElementById('signup-image-file').click()">Choose File</button>
+                    <div id="file-display" style="margin-top: 5px; font-size: 12px; color: #cccccc;"></div>
+                </div>
+                <div class="auth-buttons">
+                    <button type="submit" class="auth-btn">Sign Up</button>
+                    <button type="button" class="auth-btn" onclick="toggleAuthForm()">Sign In</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Alert Container -->
+    <div id="alert-container"></div>
+
+    <script>
+        // Auth form functions
+        function toggleAuthForm() {
+            const signinForm = document.getElementById('signin-form');
+            const signupForm = document.getElementById('signup-form');
+            
+            if (signinForm.style.display === 'none') {
+                signinForm.style.display = 'block';
+                signupForm.style.display = 'none';
+            } else {
+                signinForm.style.display = 'none';
+                signupForm.style.display = 'block';
+            }
+        }
+
+        function updateFileDisplay() {
+            const fileInput = document.getElementById('signup-image-file');
+            const fileDisplay = document.getElementById('file-display');
+            
+            if (fileInput.files.length > 0) {
+                const file = fileInput.files[0];
+                fileDisplay.textContent = `Selected: ${file.name}`;
+                fileDisplay.style.color = '#00ff00';
+            } else {
+                fileDisplay.textContent = '';
+            }
+        }
+
+        function handleSignIn(event) {
+            event.preventDefault();
+            const email = document.getElementById('signin-email').value;
+            const password = document.getElementById('signin-password').value;
+            window.signIn(email, password);
+        }
+
+        function handleSignUp(event) {
+            event.preventDefault();
+            const email = document.getElementById('signup-email').value;
+            const username = document.getElementById('signup-username').value;
+            const password = document.getElementById('signup-password').value;
+            const confirm = document.getElementById('signup-confirm').value;
+            const imageUrl = document.getElementById('signup-image-url').value;
+            const imageFile = document.getElementById('signup-image-file').files[0];
+            
+            if (password !== confirm) {
+                showAlert('Passwords do not match!', 'error');
+                return;
+            }
+            
+            if (username.length < 3) {
+                showAlert('Username must be at least 3 characters long!', 'error');
+                return;
+            }
+            
+            // Handle image upload
+            if (imageFile) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    const imageDataUrl = e.target.result;
+                    window.signUp(email, password, username, imageDataUrl);
+                };
+                reader.readAsDataURL(imageFile);
+            } else {
+                window.signUp(email, password, username, imageUrl);
+            }
+        }
+
+        // Alert functions
+        function showAlert(message, type) {
+            const container = document.getElementById('alert-container');
+            const alert = document.createElement('div');
+            alert.className = `alert ${type}`;
+            alert.textContent = message;
+            
+            container.appendChild(alert);
+            
+            setTimeout(() => {
+                alert.remove();
+            }, 5000);
+        }
+
+        function hideAuthForms() {
+            document.getElementById('auth-overlay').classList.add('hidden');
+            document.getElementById('auth-link').textContent = 'Sign Out';
+        }
+
+        function showAuthForms() {
+            document.getElementById('auth-overlay').classList.remove('hidden');
+        }
+
+        function updateUserInfo(userData) {
+            const usernameElement = document.querySelector('.profile-info .info-line:first-child .highlight-text');
+            if (usernameElement) {
+                usernameElement.textContent = userData ? userData.username : 'Player_001';
+            }
+            
+            // Update profile image
+            const profileImage = document.getElementById('profile-image');
+            if (userData && userData.imageUrl) {
+                profileImage.innerHTML = `<img src="${userData.imageUrl}" alt="Profile" style="width: 100%; height: 100%; object-fit: cover; border-radius: 5px;" onerror="this.parentElement.innerHTML='<span class=\\'muted-text\\'>[IMG]</span>'">`;
+            } else {
+                profileImage.innerHTML = '<span class="muted-text">[IMG]</span>';
+            }
+            
+            // Update profile with user data
+            const profileInfo = document.querySelector('.profile-info');
+            
+            // Clear existing user data
+            const existingUserData = profileInfo.querySelectorAll('.info-line:not(:first-child):not(:nth-child(2)):not(:nth-child(3)):not(:nth-child(4))');
+            existingUserData.forEach(el => el.remove());
+            
+            if (userData) {
+                // Add Elo rating
+                const eloLine = document.createElement('div');
+                eloLine.className = 'info-line';
+                eloLine.innerHTML = `Elo: <span class="highlight-text">${userData.elo}</span>`;
+                profileInfo.appendChild(eloLine);
+                
+                // Add games played
+                const gamesLine = document.createElement('div');
+                gamesLine.className = 'info-line';
+                gamesLine.innerHTML = `Games: <span class="highlight-text">${userData.gamesPlayed}</span>`;
+                profileInfo.appendChild(gamesLine);
+                
+                // Add win record
+                const winsLine = document.createElement('div');
+                winsLine.className = 'info-line';
+                winsLine.innerHTML = `Wins: <span class="highlight-text">${userData.wins}</span>`;
+                profileInfo.appendChild(winsLine);
+                
+                // Add email
+                const emailLine = document.createElement('div');
+                emailLine.className = 'info-line';
+                emailLine.innerHTML = `Email: <span class="user-email">${userData.email}</span>`;
+                profileInfo.appendChild(emailLine);
+            }
+            
+            // Load leaderboard
+            loadLeaderboard();
+        }
+
+        function resetUserInfo() {
+            const usernameElement = document.querySelector('.profile-info .info-line:first-child .highlight-text');
+            if (usernameElement) {
+                usernameElement.textContent = 'Player_001';
+            }
+            
+            // Reset profile to default
+            const profileInfo = document.querySelector('.profile-info');
+            const existingUserData = profileInfo.querySelectorAll('.info-line:not(:first-child):not(:nth-child(2)):not(:nth-child(3)):not(:nth-child(4))');
+            existingUserData.forEach(el => el.remove());
+            
+            // Load default leaderboard
+            loadLeaderboard();
+        }
+
+        function loadLeaderboard() {
+            const leaderboard = window.getLeaderboard();
+            const leaderboardContent = document.getElementById('leaderboard-content');
+            
+            if (leaderboard.length === 0) {
+                leaderboardContent.innerHTML = '<div class="stat-line">No players yet</div>';
+                return;
+            }
+            
+            let html = '';
+            leaderboard.forEach((player, index) => {
+                const rank = index + 1;
+                const medal = rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : '';
+                html += `<div class="stat-line">
+                    ${medal} ${rank}. ${player.username}: <span class="highlight-text">${player.elo}</span>
+                </div>`;
+            });
+            
+            leaderboardContent.innerHTML = html;
+        }
+
+        // Initialize auth link click handler
+        document.getElementById('auth-link').onclick = () => {
+            if (currentUser) {
+                // User is signed in, sign them out
+                window.signOut();
+            } else {
+                // User is not signed in, show auth forms
+                showAuthForms();
+            }
+        };
+
+        // Initialize Play button in navigation
+        document.addEventListener('DOMContentLoaded', function() {
+            const playNavButton = document.getElementById('play-nav');
+            if (playNavButton) {
+                playNavButton.onclick = (e) => {
+                    e.preventDefault();
+                    handleGameAction();
+                };
+            }
+        });
+
+        // Initialize page state
+        function initializePage() {
+            if (currentUser) {
+                document.getElementById('auth-link').textContent = 'Sign Out';
+            } else {
+                document.getElementById('auth-link').textContent = 'Sign In';
+            }
+        }
+
+        // Call initialization when page loads
+        document.addEventListener('DOMContentLoaded', initializePage);
+
+        // Play button click handler
+        document.getElementById('play-button').onclick = (e) => {
+            e.preventDefault();
+            handleGameAction();
+        };
+
+        // Function to handle game actions (Play, Start Game, Sign In)
+        function handleGameAction() {
+            if (!currentUser) {
+                // Show auth forms if not signed in
+                showAuthForms();
+            } else {
+                // User is signed in, start the game
+                startGame();
+            }
+        }
+
+        // Game start function - now uses simple matchmaking
+        function startGame() {
+            if (!currentUser) {
+                showAlert('Please sign in to play!', 'error');
+                return;
+            }
+            findMatch();
+        }
+
+        // Test function to simulate a match with proper Elo calculation
+        window.simulateMatch = function(result, opponentElo = 1000) {
+            if (!currentUser) {
+                showAlert('Please sign in first!', 'error');
+                return;
+            }
+            
+            // Use proper Elo calculation
+            const resultData = updateElo(currentUser.id, opponentElo, result);
+            if (resultData) {
+                const { newElo, eloChange } = resultData;
+                const changeText = eloChange >= 0 ? `+${eloChange}` : `${eloChange}`;
+                showAlert(`Match ${result}! Elo: ${currentUser.elo} → ${newElo} (${changeText})`, 'success');
+                
+                // Reload user info and leaderboard
+                updateUserInfo(currentUser);
+            }
+        };
+
+        // --- Simple Random Matchmaking System ---
+        let currentMatchId = null;
+        let matchListener = null;
+
+        async function findMatch() {
+            const gameArea = document.getElementById('game-area');
+            gameArea.innerHTML = '<b>🔍 Looking for opponent...</b>';
+            
+            try {
+                console.log('Starting simple matchmaking...');
+                
+                // Check if there's a waiting player
+                const waitingPlayers = await db.collection('waiting').get();
+                
+                if (!waitingPlayers.empty) {
+                    // Join existing match
+                    const waitingPlayer = waitingPlayers.docs[0];
+                    const matchId = waitingPlayer.id;
+                    
+                    console.log('Found waiting player, joining match:', matchId);
+                    
+                    // Create the match
+                    await db.collection('matches').doc(matchId).set({
+                        player1: waitingPlayer.data(),
+                        player2: {
+                            id: currentUser.id,
+                            username: currentUser.username,
+                            imageUrl: currentUser.imageUrl || null
+                        },
+                        status: 'playing',
+                        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+                    });
+                    
+                    // Remove from waiting
+                    await waitingPlayer.ref.delete();
+                    
+                    // Start listening to match
+                    startMatchListener(matchId);
+                    
+                } else {
+                    // No waiting players, join waiting room
+                    console.log('No waiting players, joining waiting room');
+                    
+                    const waitingRef = await db.collection('waiting').add({
+                        id: currentUser.id,
+                        username: currentUser.username,
+                        imageUrl: currentUser.imageUrl || null,
+                        timestamp: firebase.firestore.FieldValue.serverTimestamp()
+                    });
+                    
+                    currentMatchId = waitingRef.id;
+                    
+                    // Listen for someone to join
+                    matchListener = waitingRef.onSnapshot(doc => {
+                        if (!doc.exists) {
+                            // Someone joined, check if match was created
+                            checkForMatch();
+                        }
+                    });
+                    
+                    gameArea.innerHTML = '<b>⏳ Waiting for opponent...</b>';
+                }
+                
+            } catch (error) {
+                console.error('Matchmaking error:', error);
+                gameArea.innerHTML = `<b style="color: #ff0000;">❌ Error: ${error.message}</b>`;
+            }
+        }
+
+        async function checkForMatch() {
+            try {
+                const matches = await db.collection('matches')
+                    .where('player1.id', '==', currentUser.id)
+                    .limit(1)
+                    .get();
+                
+                if (!matches.empty) {
+                    const matchId = matches.docs[0].id;
+                    console.log('Match found:', matchId);
+                    startMatchListener(matchId);
+                }
+            } catch (error) {
+                console.error('Error checking for match:', error);
+            }
+        }
+
+        function startMatchListener(matchId) {
+            currentMatchId = matchId;
+            
+            if (matchListener) matchListener();
+            
+            matchListener = db.collection('matches').doc(matchId).onSnapshot(doc => {
+                const match = doc.data();
+                if (match) {
+                    console.log('Match update:', match);
+                    showMatchPage(matchId, match);
+                }
+            });
+        }
+
+        function showMatchPage(matchId, match) {
+            const gameArea = document.getElementById('game-area');
+            
+            const isPlayer1 = match.player1.id === currentUser.id;
+            const myUsername = isPlayer1 ? match.player1.username : match.player2.username;
+            const opponentUsername = isPlayer1 ? match.player2.username : match.player1.username;
+            
+            let html = '';
+            html += `<div style="padding: 20px; background: #001122; border: 2px solid #0080ff;">
+                <h2 style="color: #00ff00; margin-bottom: 15px;">🎮 MATCH FOUND!</h2>
+                <p><b>You:</b> ${myUsername}</p>
+                <p><b>Opponent:</b> ${opponentUsername}</p>
+                <p><b>Match ID:</b> ${matchId}</p>
+                <div style="margin-top: 20px; padding: 15px; background: #000000; border: 1px solid #0080ff;">
+                    <h3>🎯 GAME PLACEHOLDER</h3>
+                    <p>This is where the E-Card game would be!</p>
+                    <p>Cards: Emperor, Citizen, Slave</p>
+                    <p>Rules: Emperor > Citizen > Slave > Emperor</p>
+                    <button onclick="leaveMatch()" style="padding: 10px 20px; background: #ff0000; color: white; border: none; cursor: pointer;">
+                        Leave Match
+                    </button>
+                </div>
+            </div>`;
+            
+            gameArea.innerHTML = html;
+        }
+
+        function leaveMatch() {
+            if (currentMatchId) {
+                db.collection('matches').doc(currentMatchId).delete();
+            }
+            if (matchListener) matchListener();
+            currentMatchId = null;
+            matchListener = null;
+            document.getElementById('game-area').innerHTML = '';
+        }
+
+    </script>
+</body>
+</html>
+</body>
+</html>
