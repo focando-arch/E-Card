@@ -289,7 +289,9 @@ def cleanup():
 # Initialize data files on startup
 init_data_files()
 
+# Initialize data files
+init_data_files()
+
 if __name__ == '__main__':
-    init_data_files()
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False)

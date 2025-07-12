@@ -152,7 +152,7 @@
 
         // Simple auth state check
         function checkAuthState() {
-            if (currentUser) {
+            if (currentUser && currentUser.id) {
                 hideAuthForms();
                 updateUserInfo(currentUser);
             } else {
@@ -195,9 +195,13 @@
         
         // Test connection on page load
         document.addEventListener('DOMContentLoaded', async () => {
-            const isConnected = await testFlaskConnection();
-            if (!isConnected) {
-                console.error('Flask API connection failed - make sure the server is running on localhost:5000!');
+            try {
+                const isConnected = await testFlaskConnection();
+                if (!isConnected) {
+                    console.error('Flask API connection failed - check if the server is deployed correctly!');
+                }
+            } catch (error) {
+                console.error('Error testing connection:', error);
             }
         });
     </script>
@@ -1077,6 +1081,12 @@
         let matchCheckInterval = null;
 
         async function findMatch() {
+            // Check if user is signed in
+            if (!currentUser || !currentUser.id) {
+                showAlert('Please sign in first!', 'error');
+                return;
+            }
+            
             const gameArea = document.getElementById('game-area');
             gameArea.innerHTML = '<b>🔍 Looking for opponent...</b>';
             
@@ -1125,6 +1135,11 @@
         }
 
         async function checkForMatch() {
+            // Check if user is signed in
+            if (!currentUser || !currentUser.id) {
+                return;
+            }
+            
             try {
                 const response = await fetch(`${API_BASE_URL}/check-match/${currentUser.id}`);
                 const result = await response.json();
@@ -1164,6 +1179,11 @@
         }
 
         function startWaitingCheck() {
+            // Check if user is signed in
+            if (!currentUser || !currentUser.id) {
+                return;
+            }
+            
             // Check for match every 3 seconds while waiting
             const waitingInterval = setInterval(async () => {
                 try {
@@ -1226,6 +1246,7 @@
 
         function leaveMatch() {
             if (currentMatchId) {
+                const userId = currentUser ? currentUser.id : 'unknown';
                 fetch(`${API_BASE_URL}/leave-match`, {
                     method: 'POST',
                     headers: {
@@ -1233,7 +1254,7 @@
                     },
                     body: JSON.stringify({
                         match_id: currentMatchId,
-                        user_id: currentUser.id
+                        user_id: userId
                     })
                 }).catch(error => console.error('Error leaving match:', error));
             }
@@ -1268,6 +1289,12 @@
 
         async function playCard(card) {
             if (!currentMatchId) return;
+            
+            // Check if user is signed in
+            if (!currentUser || !currentUser.id) {
+                showAlert('Please sign in first!', 'error');
+                return;
+            }
             
             try {
                 const response = await fetch(`${API_BASE_URL}/play-card`, {
