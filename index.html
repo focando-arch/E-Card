@@ -725,6 +725,7 @@
                     </div>
                     <div style="margin-top: 10px;">
                         <button onclick="testFirebaseConnection()" style="padding: 5px 10px; background: #001122; border: 1px solid #0080ff; color: #0080ff; font-size: 12px;">Test Connection</button>
+                        <button onclick="findMatch()" style="padding: 5px 10px; background: #001122; border: 1px solid #00ff00; color: #00ff00; font-size: 12px; margin-left: 10px;">Test Real-time</button>
                     </div>
                     <div id="game-area" style="margin-top: 15px; padding: 10px; border: 1px solid #0080ff; background: #001122; min-height: 100px;"></div>
                 </div>
@@ -1071,66 +1072,49 @@
 
         async function findMatch() {
             const gameArea = document.getElementById('game-area');
-            gameArea.innerHTML = '<b>🔍 Looking for opponent...</b>';
+            gameArea.innerHTML = '<b>🔍 Testing connection...</b>';
             
             try {
-                console.log('Starting simple matchmaking...');
+                console.log('=== STARTING CONNECTION TEST ===');
                 
-                // Check if there's a waiting player
-                const waitingPlayers = await db.collection('waiting').get();
+                // Test 1: Can we write to Firestore?
+                console.log('Test 1: Writing to Firestore...');
+                const testRef = await db.collection('test').add({
+                    message: 'Hello from ' + currentUser.username,
+                    timestamp: firebase.firestore.FieldValue.serverTimestamp()
+                });
+                console.log('✅ Write successful, doc ID:', testRef.id);
                 
-                if (!waitingPlayers.empty) {
-                    // Join existing match
-                    const waitingPlayer = waitingPlayers.docs[0];
-                    const matchId = waitingPlayer.id;
-                    
-                    console.log('Found waiting player, joining match:', matchId);
-                    
-                    // Create the match
-                    await db.collection('matches').doc(matchId).set({
-                        player1: waitingPlayer.data(),
-                        player2: {
-                            id: currentUser.id,
-                            username: currentUser.username,
-                            imageUrl: currentUser.imageUrl || null
-                        },
-                        status: 'playing',
-                        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+                // Test 2: Can we read from Firestore?
+                console.log('Test 2: Reading from Firestore...');
+                const testDoc = await testRef.get();
+                console.log('✅ Read successful:', testDoc.data());
+                
+                // Test 3: Can we listen for changes?
+                console.log('Test 3: Setting up real-time listener...');
+                const unsubscribe = testRef.onSnapshot(doc => {
+                    console.log('✅ Real-time update received:', doc.data());
+                    gameArea.innerHTML = '<b style="color: #00ff00;">✅ CONNECTION WORKING!</b><br>Real-time updates are working!';
+                });
+                
+                // Test 4: Update the document to trigger listener
+                setTimeout(async () => {
+                    console.log('Test 4: Triggering real-time update...');
+                    await testRef.update({
+                        message: 'Updated by ' + currentUser.username,
+                        updated: true
                     });
-                    
-                    // Remove from waiting
-                    await waitingPlayer.ref.delete();
-                    
-                    // Start listening to match
-                    startMatchListener(matchId);
-                    
-                } else {
-                    // No waiting players, join waiting room
-                    console.log('No waiting players, joining waiting room');
-                    
-                    const waitingRef = await db.collection('waiting').add({
-                        id: currentUser.id,
-                        username: currentUser.username,
-                        imageUrl: currentUser.imageUrl || null,
-                        timestamp: firebase.firestore.FieldValue.serverTimestamp()
-                    });
-                    
-                    currentMatchId = waitingRef.id;
-                    
-                    // Listen for someone to join
-                    matchListener = waitingRef.onSnapshot(doc => {
-                        if (!doc.exists) {
-                            // Someone joined, check if match was created
-                            checkForMatch();
-                        }
-                    });
-                    
-                    gameArea.innerHTML = '<b>⏳ Waiting for opponent...</b>';
-                }
+                }, 2000);
+                
+                // Clean up after 10 seconds
+                setTimeout(() => {
+                    unsubscribe();
+                    testRef.delete();
+                }, 10000);
                 
             } catch (error) {
-                console.error('Matchmaking error:', error);
-                gameArea.innerHTML = `<b style="color: #ff0000;">❌ Error: ${error.message}</b>`;
+                console.error('❌ Connection test failed:', error);
+                gameArea.innerHTML = `<b style="color: #ff0000;">❌ CONNECTION FAILED</b><br>Error: ${error.message}<br><small>Check console for details</small>`;
             }
         }
 
