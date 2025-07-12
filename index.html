@@ -5,22 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>E-Card</title>
     
-    <!-- Firebase SDKs -->
-    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
-    
-    <!-- Initialize Firebase -->
+    <!-- Flask API for multiplayer -->
     <script>
-    const firebaseConfig = {
-      apiKey: "AIzaSyAt5z8t9LETk_SJcFr-dB6fgFy8bO2tSfA",
-      authDomain: "e-card-ee286.firebaseapp.com",
-      projectId: "e-card-ee286",
-      storageBucket: "e-card-ee286.firebasestorage.app",
-      messagingSenderId: "202389524859",
-      appId: "1:202389524859:web:81644404aec5317bd96dde"
-    };
-    firebase.initializeApp(firebaseConfig);
-    const db = firebase.firestore();
+    // Flask API configuration
+    const API_BASE_URL = window.location.origin + '/api';
+    
+    // Multiplayer game state
+    let currentMatchId = null;
+    let isPlayer1 = false;
     </script>
     
     <!-- Simple Auth System -->
@@ -173,24 +165,39 @@
         // Check auth state on page load
         document.addEventListener('DOMContentLoaded', checkAuthState);
         
-        // Test Firebase connection
-        async function testFirebaseConnection() {
+        // Test Flask API connection
+        async function testFlaskConnection() {
             try {
-                console.log('Testing Firebase connection...');
-                const testDoc = await db.collection('test').doc('connection').get();
-                console.log('Firebase connection successful!');
-                return true;
+                console.log('Testing Flask API connection...');
+                const response = await fetch(`${API_BASE_URL}/cleanup`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({})
+                });
+                
+                if (response.ok) {
+                    console.log('Flask API connection successful!');
+                    showAlert('✅ Flask API connection successful!', 'success');
+                    return true;
+                } else {
+                    console.error('Flask API connection failed:', response.status);
+                    showAlert('❌ Flask API connection failed!', 'error');
+                    return false;
+                }
             } catch (error) {
-                console.error('Firebase connection failed:', error);
+                console.error('Flask API connection failed:', error);
+                showAlert('❌ Flask API connection failed!', 'error');
                 return false;
             }
         }
         
         // Test connection on page load
         document.addEventListener('DOMContentLoaded', async () => {
-            const isConnected = await testFirebaseConnection();
+            const isConnected = await testFlaskConnection();
             if (!isConnected) {
-                console.error('Firebase connection failed - check your Firestore rules!');
+                console.error('Flask API connection failed - make sure the server is running on localhost:5000!');
             }
         });
     </script>
@@ -724,7 +731,7 @@
                         <a href="#" class="play-button" id="play-button">[START GAME]</a>
                     </div>
                     <div style="margin-top: 10px;">
-                        <button onclick="testFirebaseConnection()" style="padding: 5px 10px; background: #001122; border: 1px solid #0080ff; color: #0080ff; font-size: 12px;">Test Connection</button>
+                        <button onclick="testFlaskConnection()" style="padding: 5px 10px; background: #001122; border: 1px solid #0080ff; color: #0080ff; font-size: 12px;">Test Connection</button>
                         <button onclick="findMatch()" style="padding: 5px 10px; background: #001122; border: 1px solid #00ff00; color: #00ff00; font-size: 12px; margin-left: 10px;">Test Real-time</button>
                     </div>
                     <div id="game-area" style="margin-top: 15px; padding: 10px; border: 1px solid #0080ff; background: #001122; min-height: 100px;"></div>
@@ -1066,95 +1073,122 @@
             }
         };
 
-        // --- Simple Random Matchmaking System ---
-        let currentMatchId = null;
-        let matchListener = null;
+        // --- Flask API Multiplayer System ---
+        let matchCheckInterval = null;
 
         async function findMatch() {
             const gameArea = document.getElementById('game-area');
-            gameArea.innerHTML = '<b>🔍 Testing connection...</b>';
+            gameArea.innerHTML = '<b>🔍 Looking for opponent...</b>';
             
             try {
-                console.log('=== STARTING CONNECTION TEST ===');
+                console.log('Starting Flask API matchmaking...');
                 
-                // Test 1: Can we write to Firestore?
-                console.log('Test 1: Writing to Firestore...');
-                const testRef = await db.collection('test').add({
-                    message: 'Hello from ' + currentUser.username,
-                    timestamp: firebase.firestore.FieldValue.serverTimestamp()
-                });
-                console.log('✅ Write successful, doc ID:', testRef.id);
-                
-                // Test 2: Can we read from Firestore?
-                console.log('Test 2: Reading from Firestore...');
-                const testDoc = await testRef.get();
-                console.log('✅ Read successful:', testDoc.data());
-                
-                // Test 3: Can we listen for changes?
-                console.log('Test 3: Setting up real-time listener...');
-                const unsubscribe = testRef.onSnapshot(doc => {
-                    console.log('✅ Real-time update received:', doc.data());
-                    gameArea.innerHTML = '<b style="color: #00ff00;">✅ CONNECTION WORKING!</b><br>Real-time updates are working!';
+                // Join match using Flask API
+                const response = await fetch(`${API_BASE_URL}/join-match`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        user_id: currentUser.id,
+                        username: currentUser.username
+                    })
                 });
                 
-                // Test 4: Update the document to trigger listener
-                setTimeout(async () => {
-                    console.log('Test 4: Triggering real-time update...');
-                    await testRef.update({
-                        message: 'Updated by ' + currentUser.username,
-                        updated: true
-                    });
-                }, 2000);
+                const result = await response.json();
                 
-                // Clean up after 10 seconds
-                setTimeout(() => {
-                    unsubscribe();
-                    testRef.delete();
-                }, 10000);
+                if (response.ok) {
+                    if (result.status === 'joined') {
+                        // Joined existing match
+                        console.log('Joined match:', result.match_id);
+                        currentMatchId = result.match_id;
+                        startMatchChecking(result.match_id);
+                        showMatchPage(result.match_id, {
+                            player1_username: result.player1,
+                            player2_username: result.player2
+                        });
+                    } else if (result.status === 'waiting') {
+                        // Waiting for opponent
+                        console.log('Waiting for opponent...');
+                        gameArea.innerHTML = '<b>⏳ Waiting for opponent...</b>';
+                        startWaitingCheck();
+                    }
+                } else {
+                    console.error('Error joining match:', result.error);
+                    gameArea.innerHTML = `<b style="color: #ff0000;">❌ Error: ${result.error}</b>`;
+                }
                 
             } catch (error) {
-                console.error('❌ Connection test failed:', error);
-                gameArea.innerHTML = `<b style="color: #ff0000;">❌ CONNECTION FAILED</b><br>Error: ${error.message}<br><small>Check console for details</small>`;
+                console.error('Matchmaking error:', error);
+                gameArea.innerHTML = `<b style="color: #ff0000;">❌ Error: ${error.message}</b>`;
             }
         }
 
         async function checkForMatch() {
             try {
-                const matches = await db.collection('matches')
-                    .where('player1.id', '==', currentUser.id)
-                    .limit(1)
-                    .get();
+                const response = await fetch(`${API_BASE_URL}/check-match/${currentUser.id}`);
+                const result = await response.json();
                 
-                if (!matches.empty) {
-                    const matchId = matches.docs[0].id;
-                    console.log('Match found:', matchId);
-                    startMatchListener(matchId);
+                if (result.found) {
+                    console.log('Match found:', result.match.id);
+                    currentMatchId = result.match.id;
+                    startMatchChecking(result.match.id);
+                    showMatchPage(result.match.id, result.match);
                 }
             } catch (error) {
                 console.error('Error checking for match:', error);
             }
         }
 
-        function startMatchListener(matchId) {
+        function startMatchChecking(matchId) {
             currentMatchId = matchId;
             
-            if (matchListener) matchListener();
+            // Clear any existing interval
+            if (matchCheckInterval) {
+                clearInterval(matchCheckInterval);
+            }
             
-            matchListener = db.collection('matches').doc(matchId).onSnapshot(doc => {
-                const match = doc.data();
-                if (match) {
-                    console.log('Match update:', match);
-                    showMatchPage(matchId, match);
+            // Check for match updates every 2 seconds
+            matchCheckInterval = setInterval(async () => {
+                try {
+                    const response = await fetch(`${API_BASE_URL}/game-state/${matchId}`);
+                    const gameState = await response.json();
+                    
+                    if (gameState) {
+                        updateGameDisplay(gameState);
+                    }
+                } catch (error) {
+                    console.error('Error checking game state:', error);
                 }
-            });
+            }, 2000);
+        }
+
+        function startWaitingCheck() {
+            // Check for match every 3 seconds while waiting
+            const waitingInterval = setInterval(async () => {
+                try {
+                    const response = await fetch(`${API_BASE_URL}/check-match/${currentUser.id}`);
+                    const result = await response.json();
+                    
+                    if (result.found) {
+                        clearInterval(waitingInterval);
+                        console.log('Match found while waiting:', result.match.id);
+                        currentMatchId = result.match.id;
+                        startMatchChecking(result.match.id);
+                        showMatchPage(result.match.id, result.match);
+                    }
+                } catch (error) {
+                    console.error('Error checking for match while waiting:', error);
+                }
+            }, 3000);
         }
 
         function showMatchPage(matchId, match) {
             const gameArea = document.getElementById('game-area');
             
-            const isPlayer1 = match.player1.id === currentUser.id;
-            const myUsername = isPlayer1 ? match.player1.username : match.player2.username;
-            const opponentUsername = isPlayer1 ? match.player2.username : match.player1.username;
+            isPlayer1 = match.player1_id === currentUser.id;
+            const myUsername = isPlayer1 ? match.player1_username : match.player2_username;
+            const opponentUsername = isPlayer1 ? match.player2_username : match.player1_username;
             
             let html = '';
             html += `<div style="padding: 20px; background: #001122; border: 2px solid #0080ff;">
@@ -1176,14 +1210,91 @@
             gameArea.innerHTML = html;
         }
 
+        function getInitialGameState() {
+            return {
+                player1: { 
+                    hand: ['Emperor', 'Citizen', 'Citizen', 'Citizen', 'Slave'], 
+                    played: [] 
+                },
+                player2: { 
+                    hand: ['Emperor', 'Citizen', 'Citizen', 'Citizen', 'Slave'], 
+                    played: [] 
+                },
+                history: []
+            };
+        }
+
         function leaveMatch() {
             if (currentMatchId) {
-                db.collection('matches').doc(currentMatchId).delete();
+                fetch(`${API_BASE_URL}/leave-match`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        match_id: currentMatchId,
+                        user_id: currentUser.id
+                    })
+                }).catch(error => console.error('Error leaving match:', error));
             }
-            if (matchListener) matchListener();
+            
+            if (matchCheckInterval) {
+                clearInterval(matchCheckInterval);
+            }
+            
             currentMatchId = null;
-            matchListener = null;
+            matchCheckInterval = null;
             document.getElementById('game-area').innerHTML = '';
+        }
+
+        function updateGameDisplay(gameState) {
+            const gameArea = document.getElementById('game-area');
+            
+            // Update game display with current state
+            let html = '';
+            html += `<div style="padding: 20px; background: #001122; border: 2px solid #0080ff;">
+                <h2 style="color: #00ff00; margin-bottom: 15px;">🎮 GAME IN PROGRESS</h2>
+                <p><b>Turn:</b> ${gameState.current_turn}/${gameState.max_turns}</p>
+                <p><b>Your Hand:</b> ${gameState.player1.hand.join(', ')}</p>
+                <p><b>Opponent's Hand:</b> ${gameState.player2.hand.join(', ')}</p>
+                <button onclick="playCard('Emperor')" style="margin: 5px; padding: 5px 10px; background: #ff0000; color: white; border: none;">Play Emperor</button>
+                <button onclick="playCard('Citizen')" style="margin: 5px; padding: 5px 10px; background: #00ff00; color: white; border: none;">Play Citizen</button>
+                <button onclick="playCard('Slave')" style="margin: 5px; padding: 5px 10px; background: #0000ff; color: white; border: none;">Play Slave</button>
+                <button onclick="leaveMatch()" style="margin: 5px; padding: 5px 10px; background: #ff0000; color: white; border: none;">Leave Match</button>
+            </div>`;
+            
+            gameArea.innerHTML = html;
+        }
+
+        async function playCard(card) {
+            if (!currentMatchId) return;
+            
+            try {
+                const response = await fetch(`${API_BASE_URL}/play-card`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        match_id: currentMatchId,
+                        user_id: currentUser.id,
+                        card: card
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok) {
+                    console.log('Card played successfully:', result);
+                    // Game state will be updated by the interval check
+                } else {
+                    console.error('Error playing card:', result.error);
+                    showAlert(`Error playing card: ${result.error}`, 'error');
+                }
+            } catch (error) {
+                console.error('Error playing card:', error);
+                showAlert('Error playing card', 'error');
+            }
         }
 
     </script>
